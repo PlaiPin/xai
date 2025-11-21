@@ -1,0 +1,268 @@
+menu "xAI Configuration"
+
+    config XAI_API_KEY
+        string "Default xAI API Key"
+        default ""
+        help
+            Your xAI API key from console.x.ai
+            Can be overridden at runtime via xai_config_t
+            Leave empty to configure via code only.
+
+    config XAI_BASE_URL
+        string "xAI API Base URL"
+        default "https://api.x.ai/v1"
+        help
+            Base URL for xAI API endpoints.
+            Default: https://api.x.ai/v1
+
+    config XAI_DEFAULT_MODEL
+        string "Default Model"
+        default "grok-3-latest"
+        help
+            Default model to use for completions.
+            
+            Popular options:
+            - grok-4-latest: Latest grok-4 with reasoning (most capable)
+            - grok-3-latest: Current generation (balanced, recommended)
+            - grok-3-mini-latest: Small, efficient (best for ESP32)
+            - grok-3-fast-latest: Fast responses (low latency)
+            - grok-2-vision-latest: Vision capabilities
+            
+            Use *-latest suffix for auto-updating to newest version.
+            Dated models (e.g., grok-2-1212) are pinned to specific releases.
+
+    menu "Memory Configuration"
+
+        config XAI_MAX_RESPONSE_SIZE
+            int "Maximum response buffer size (bytes)"
+            default 8192
+            range 1024 32768
+            help
+                Maximum size for API responses.
+                
+                Recommendations:
+                - 2048: Minimal (short responses only)
+                - 8192: Recommended (most conversations)
+                - 16384: Large (long-form content)
+                
+                Larger values allow longer responses but use more memory.
+                Each buffer consumes this amount of heap.
+
+        config XAI_BUFFER_POOL_SIZE
+            int "Number of buffers in pool"
+            default 2
+            range 1 4
+            help
+                Number of response buffers to pre-allocate.
+                
+                More buffers allow concurrent requests from multiple tasks,
+                but consume more memory (each buffer is XAI_MAX_RESPONSE_SIZE bytes).
+                
+                Recommendations:
+                - 1: Single-threaded applications
+                - 2: Recommended (allows one active + one standby)
+                - 3-4: Multi-threaded applications
+
+    endmenu # Memory Configuration
+
+    menu "Feature Toggles"
+
+        config XAI_ENABLE_STREAMING
+            bool "Enable streaming support"
+            default y
+            help
+                Enable Server-Sent Events (SSE) streaming for real-time responses.
+                
+                When enabled, you can use xai_chat_completion_stream() to receive
+                responses incrementally as they are generated.
+                
+                Disable to save ~2KB of flash space if you only need
+                synchronous completions.
+
+        config XAI_ENABLE_VISION
+            bool "Enable vision API support"
+            default y
+            help
+                Enable image analysis capabilities with grok-2-vision models.
+                
+                Allows passing images via xai_image_t in messages for
+                multi-modal conversations.
+                
+                Disable to save ~1KB of flash space if you only need
+                text-based chat.
+
+        config XAI_ENABLE_TOOLS
+            bool "Enable function/tool calling"
+            default n
+            help
+                Enable function calling and tool integration.
+                
+                Allows the model to call functions defined in your application
+                (client-side tools) or use xAI's server-side tools.
+                
+                Requires additional memory for tool definitions (~3KB).
+                Disable if you don't need tool calling.
+
+        config XAI_ENABLE_SEARCH
+            bool "Enable search/grounding support"
+            default y
+            help
+                Enable real-time web/X/news search and citation support.
+                
+                Allows Grok models to access current information from:
+                - Web search
+                - X (Twitter) posts
+                - News articles
+                - RSS feeds (if enabled)
+                
+                Requires additional memory for citations (~2-5KB per response).
+                Disable to save ~3KB of flash space if real-time data
+                is not needed.
+
+        config XAI_ENABLE_CONVERSATION_HELPER
+            bool "Enable conversation helper API"
+            default y
+            help
+                Enable xai_conversation_* helper functions for managing
+                multi-turn conversations with automatic message history.
+                
+                Provides a convenient wrapper around the core API for
+                stateful chat interactions.
+                
+                Disable to save ~2KB of flash space if you prefer to
+                manage conversation state manually.
+
+    endmenu # Feature Toggles
+
+    menu "Advanced Features"
+        depends on XAI_ENABLE_SEARCH || XAI_ENABLE_TOOLS
+
+        config XAI_ENABLE_RSS_SEARCH
+            bool "Enable RSS feed search source"
+            depends on XAI_ENABLE_SEARCH
+            default n
+            help
+                Enable RSS feeds as a search source for grounding.
+                
+                Currently supports 1 RSS feed per request.
+                Useful for domain-specific information from RSS feeds.
+                
+                Disable to save ~1KB of flash space if RSS is not needed.
+
+        config XAI_MAX_SEARCH_RESULTS
+            int "Maximum search results/citations"
+            depends on XAI_ENABLE_SEARCH
+            default 15
+            range 1 50
+            help
+                Maximum number of search results/citations to return.
+                
+                More results provide better context for the model but
+                use more memory (~200 bytes per citation).
+                
+                Recommendations:
+                - 5-10: Minimal memory usage
+                - 15: Recommended balance
+                - 30+: Maximum context (requires more memory)
+
+        config XAI_ENABLE_REASONING_EFFORT
+            bool "Enable reasoning effort control"
+            default y
+            help
+                Enable control of reasoning depth for grok-4 models.
+                
+                Allows setting reasoning effort to "low" or "high" via
+                xai_options_t.reasoning_effort field.
+                
+                Only applies to grok-4 models with reasoning capabilities.
+                Disable to save ~500 bytes of flash space.
+
+        config XAI_ENABLE_PARALLEL_TOOLS
+            bool "Enable parallel function calling"
+            depends on XAI_ENABLE_TOOLS
+            default y
+            help
+                Allow multiple tool calls in parallel.
+                
+                When enabled (default), the model can call multiple functions
+                simultaneously. When disabled, tools are called sequentially.
+                
+                Parallel mode may use slightly more memory during processing.
+
+        config XAI_ENABLE_RESPONSES_API
+            bool "Enable Responses API (server-side tools)"
+            depends on XAI_ENABLE_TOOLS
+            default n
+            help
+                Enable agentic Responses API with server-side tool execution.
+                
+                Allows use of pre-built tools that run on xAI servers:
+                - webSearch: Web search with xAI orchestration
+                - xSearch: X/Twitter search
+                - codeExecution: Python code execution
+                
+                Only works with grok-4 models.
+                
+                WARNING: Requires significant additional memory (~5-8KB).
+                NOT RECOMMENDED for ESP32 unless specifically needed.
+
+    endmenu # Advanced Features
+
+    menu "Network Settings"
+
+        config XAI_HTTP_TIMEOUT_MS
+            int "HTTP request timeout (milliseconds)"
+            default 60000
+            range 5000 300000
+            help
+                Timeout for API requests in milliseconds.
+                
+                Recommendations:
+                - 30000 (30s): Fast networks, short responses
+                - 60000 (60s): Recommended (default)
+                - 120000 (120s): Slow networks, long responses
+                - 180000 (180s): Very slow networks or complex tool calls
+                
+                Increase for slower networks or when expecting longer responses.
+                Streaming requests may take longer than non-streaming.
+
+        config XAI_MAX_RETRIES
+            int "Maximum retry attempts"
+            default 3
+            range 0 10
+            help
+                Number of times to retry failed requests.
+                
+                Note: Exponential backoff is not yet implemented.
+                Set to 0 to disable retries.
+                
+                Recommendations:
+                - 0: No retries (fail fast)
+                - 3: Recommended (default)
+                - 5+: Unreliable networks
+
+    endmenu # Network Settings
+
+    menu "Logging"
+
+        config XAI_LOG_LEVEL
+            int "Log level"
+            default 3
+            range 0 5
+            help
+                Logging verbosity level:
+                
+                0: None - No logging (production)
+                1: Error - Only critical errors
+                2: Warning - Errors and warnings
+                3: Info - General information (recommended)
+                4: Debug - Detailed debugging information
+                5: Verbose - Everything (development only)
+                
+                Lower values save flash space and reduce runtime overhead.
+                Use level 3 (Info) for development, level 1 (Error) for production.
+
+    endmenu # Logging
+
+endmenu # xAI Configuration
+

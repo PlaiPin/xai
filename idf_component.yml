@@ -1,0 +1,34 @@
+## IDF Component Manager Manifest File
+version: "0.1.0"
+description: "Full-featured ESP-IDF component for xAI's Grok API with chat, vision, search, tools, and image generation"
+url: "https://github.com/PlaiPin/xai"
+documentation: "https://github.com/PlaiPin/xai/blob/main/README.md"
+repository: "https://github.com/PlaiPin/xai.git"
+issues: "https://github.com/PlaiPin/xai/issues"
+license: "Apache-2.0"
+
+maintainers:
+  - "PlaiPin <contact@plaipin.com>"
+
+dependencies:
+  ## Required IDF version (v5.0+ for modern HTTP client features)
+  idf:
+    version: ">=5.0.0"
+  
+  # cJSON for JSON parsing and generation
+  # Note: esp_http_client, esp-tls, mbedtls are built-in IDF components
+  # and are specified in CMakeLists.txt REQUIRES section
+  espressif/cjson:
+    version: "^1.7.15"
+    public: true
+
+examples:
+  - path: "examples/basic_chat"
+
+tags:
+  - xai
+  - grok
+  - llm
+  - chat
+  - vision
+  - rest-api
