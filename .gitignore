@@ -1,0 +1,68 @@
+# ESP-IDF Build artifacts
+build/
+sdkconfig
+sdkconfig.old
+*.pyc
+
+# Component build artifacts
+*.o
+*.a
+*.so
+*.bin
+*.elf
+*.map
+
+# C/C++ artifacts
+*.d
+*.obj
+*.exe
+*.out
+*.app
+*.i*86
+*.x86_64
+*.hex
+
+# Libraries
+*.lib
+*.dylib
+*.so.*
+
+# Editor and IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Dependencies
+dependencies.lock
+managed_components/
+
+# Test and coverage
+*.gcda
+*.gcno
+*.gcov
+coverage/
+test_report/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+install_manifest.txt
+
+# Python virtual environment (if using ESP-IDF tools)
+venv/
+.venv/
+env/
+.env/
+
+# Flash download tool
+download.config
+
