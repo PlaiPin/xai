@@ -36,6 +36,10 @@ Alternatively, edit the values directly in `main.c`:
 #define XAI_API_KEY                "xai-your-api-key-here"
 ```
 
+### 3. Increase main task stack size
+Run `idf.py menuconfig` and set:
+Component config → ESP System Settings → Main task stack size to 12288
+
 ## Build and Flash
 
 ```bash
