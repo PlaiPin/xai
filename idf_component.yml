@@ -1,6 +1,6 @@
 ## IDF Component Manager Manifest File
 version: "0.1.0"
-description: "Full-featured ESP-IDF component for xAI's Grok API with chat, vision, search, tools, and image generation"
+description: "Production-ready ESP-IDF component for xAI Grok API - 25+ models, streaming chat, vision, web/X/RSS search, function calling, image generation, and Responses API optimized for ESP32"
 url: "https://github.com/PlaiPin/xai"
 documentation: "https://github.com/PlaiPin/xai/blob/main/README.md"
 repository: "https://github.com/PlaiPin/xai.git"
@@ -24,6 +24,12 @@ dependencies:
 
 examples:
   - path: "examples/basic_chat"
+  - path: "examples/streaming_chat"
+  - path: "examples/conversation"
+  - path: "examples/vision"
+  - path: "examples/web_search"
+  - path: "examples/tools"
+  - path: "examples/image_generation"
 
 tags:
   - xai
@@ -31,4 +37,11 @@ tags:
   - llm
   - chat
   - vision
-  - rest-api
+  - streaming
+  - search
+  - tools
+  - image
+  - http
+  - rest
+  - machine_learning
+  - esp32
