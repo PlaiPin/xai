@@ -4,6 +4,10 @@ sdkconfig
 sdkconfig.old
 *.pyc
 
+# Component distribution artifacts
+dist/
+*.tgz
+
 # Component build artifacts
 *.o
 *.a
