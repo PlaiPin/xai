@@ -32,6 +32,7 @@
 #include "esp_netif.h"
 #include "esp_websocket_client.h"
 #include "esp_crt_bundle.h"
+#include "esp_heap_caps.h"
 #include "driver/i2s_std.h"
 #include "driver/i2c_master.h"
 #include "driver/gpio.h"
@@ -74,15 +75,10 @@ static const char *TAG = "voice_demo";
 #define PA_ENABLE_GPIO  (GPIO_NUM_46)  // Power amplifier enable
 
 
-// Audio buffer configuration
-// 20480 samples = 40KB buffer for decoded PCM audio
-// Server sends chunks up to ~30KB decoded, need headroom for largest deltas
-#define AUDIO_BUFFER_SIZE (20480)
-
-// WebSocket message buffering for fragmented messages
-// 48KB buffer - balances message size handling with RAM constraints
-// Some audio deltas can exceed 32KB (especially at 16kHz with longer durations)
-#define WS_BUFFER_SIZE (49152)
+// Audio buffer configuration (allocated in PSRAM, no size constraints)
+// 51200 samples = 102.4KB buffer for decoded PCM audio
+// With PSRAM we can handle even the largest xAI audio deltas (~60KB base64 → ~45KB PCM)
+#define AUDIO_BUFFER_SIZE (51200)
 
 // Event group bits
 #define WIFI_CONNECTED_BIT BIT0
@@ -95,13 +91,15 @@ static esp_websocket_client_handle_t client = NULL;
 static i2s_chan_handle_t tx_handle = NULL;  // I2S TX channel for audio output
 static es8311_handle_t es8311_handle = NULL;  // ES8311 codec handle
 
-// Buffer for handling fragmented WebSocket messages
-static char ws_message_buffer[WS_BUFFER_SIZE] = {0};
-static size_t ws_buffer_len = 0;
+// WebSocket message reassembly buffer (allocated in PSRAM)
+// TCP delivers large messages in chunks, we must reassemble before parsing
+// With PSRAM, we can use much larger buffers without affecting internal heap/TLS
+#define WS_REASSEMBLY_SIZE (131072)  // 128KB - handles all xAI audio deltas
+static char *ws_reassembly_buffer = NULL;  // Will be allocated in PSRAM
+static size_t ws_reassembly_len = 0;
 
-// Audio buffer for PCM decoding (40KB - too large for stack!)
-// Declared static to avoid stack overflow
-static int16_t pcm_buffer[AUDIO_BUFFER_SIZE];
+// Audio buffer for PCM decoding (40KB - allocated in PSRAM)
+static int16_t *pcm_buffer = NULL;  // Will be allocated in PSRAM
 
 // ============================================================================
 // WiFi Setup
@@ -371,75 +369,76 @@ static void websocket_event_handler(void *handler_args, esp_event_base_t base,
         break;
 
     case WEBSOCKET_EVENT_DATA:
+        // Large messages arrive in TCP-sized chunks - must reassemble
         if (data->data_len > 0) {
-            char *json_str = NULL;
+            ESP_LOGD(TAG, "📦 WS chunk: %d bytes (buffer=%zu)", data->data_len, ws_reassembly_len);
+            
             cJSON *root = NULL;
             
-            // Strategy: Keep buffering until we have valid JSON
-            // Don't assume we know when "final fragment" arrives
-            
-            // If we're already buffering, continue accumulating
-            if (ws_buffer_len > 0) {
-                // Continue buffering
-                if (ws_buffer_len + data->data_len < WS_BUFFER_SIZE) {
-                    memcpy(ws_message_buffer + ws_buffer_len, data->data_ptr, data->data_len);
-                    ws_buffer_len += data->data_len;
-                    ws_message_buffer[ws_buffer_len] = '\0';
+            // If already buffering, MUST append new data to buffer first (don't parse new chunk alone!)
+            if (ws_reassembly_len > 0) {
+                // Continue buffering - append new chunk to existing buffer
+                if (ws_reassembly_len + data->data_len < WS_REASSEMBLY_SIZE) {
+                    memcpy(ws_reassembly_buffer + ws_reassembly_len, data->data_ptr, data->data_len);
+                    ws_reassembly_len += data->data_len;
                     
-                    // Try to parse the accumulated buffer
-                    root = cJSON_Parse(ws_message_buffer);
+                    // Try parsing the accumulated data
+                    root = cJSON_ParseWithLength(ws_reassembly_buffer, ws_reassembly_len);
                     if (root) {
-                        // Success! We have a complete message
-                        ESP_LOGI(TAG, "✓ Reassembled message (%zu bytes)", ws_buffer_len);
-                        ws_buffer_len = 0; // Clear buffer for next message
-                        // Continue to message processing below
+                        ESP_LOGI(TAG, "✓ Reassembled JSON (%zu bytes total)", ws_reassembly_len);
+                        ws_reassembly_len = 0;  // Success - reset buffer for next message
                     } else {
-                        // Not complete yet, keep buffering
-                        ESP_LOGD(TAG, "Still buffering... (%zu bytes accumulated)", ws_buffer_len);
-                        break; // Wait for more data
+                        ESP_LOGI(TAG, "Still buffering... (%zu bytes accumulated)", ws_reassembly_len);
+                        break;  // Wait for more data
                     }
                 } else {
-                    // Buffer overflow - message too large or corrupted
-                    ESP_LOGW(TAG, "Buffer overflow at %zu bytes! Discarding.", ws_buffer_len);
-                    ws_buffer_len = 0;
+                    ESP_LOGW(TAG, "⚠️ OVERFLOW: buffered=%zu + incoming=%d = %zu (max=%d)", 
+                             ws_reassembly_len, data->data_len, 
+                             ws_reassembly_len + data->data_len, WS_REASSEMBLY_SIZE);
+                    ws_reassembly_len = 0;
                     break;
                 }
             } else {
-                // No buffered data - try to parse this chunk directly
-                json_str = (char *)malloc(data->data_len + 1);
-                if (!json_str) {
-                    ESP_LOGE(TAG, "Failed to allocate memory for JSON");
-                    break;
-                }
+                // Not buffering yet - try direct parse first (optimization for small messages)
+                root = cJSON_ParseWithLength((const char *)data->data_ptr, data->data_len);
                 
-                memcpy(json_str, data->data_ptr, data->data_len);
-                json_str[data->data_len] = '\0';
-                
-                root = cJSON_Parse(json_str);
                 if (!root) {
-                    // Parse failed - this is likely the start of a fragmented message
-                    // Start buffering it
-                    if (data->data_len < WS_BUFFER_SIZE) {
-                        memcpy(ws_message_buffer, data->data_ptr, data->data_len);
-                        ws_buffer_len = data->data_len;
-                        ws_message_buffer[ws_buffer_len] = '\0';
-                        ESP_LOGD(TAG, "Started buffering (%d bytes)", data->data_len);
+                    // Parse failed - start buffering
+                    if (data->data_len < WS_REASSEMBLY_SIZE) {
+                        memcpy(ws_reassembly_buffer, data->data_ptr, data->data_len);
+                        ws_reassembly_len = data->data_len;
+                        ESP_LOGI(TAG, "🔄 Started buffering (%d bytes)", data->data_len);
                     } else {
-                        ESP_LOGW(TAG, "First chunk too large (%d bytes)!", data->data_len);
+                        ESP_LOGW(TAG, "⚠️ First chunk too large: %d bytes (max=%d)", 
+                                 data->data_len, WS_REASSEMBLY_SIZE);
                     }
-                    free(json_str);
-                    break;
+                    break;  // Wait for more data
                 }
-                // Parsed successfully as standalone message
-                // Continue to message processing below
             }
             
-            // At this point, 'root' is always valid
+            // If root is still NULL here, parsing failed completely
+            if (!root) {
+                ESP_LOGW(TAG, "Failed to parse JSON (len=%d)", data->data_len);
+                break;
+            }
+            
             cJSON *type = cJSON_GetObjectItem(root, "type");
             if (!type || !type->valuestring) {
-                ESP_LOGW(TAG, "JSON missing 'type' field");
+                // Should be very rare now with fixed reassembly logic
+                char *json_str = cJSON_PrintUnformatted(root);
+                if (json_str) {
+                    size_t json_len = strlen(json_str);
+                    if (json_len > 200) {
+                        ESP_LOGW(TAG, "⚠️ JSON missing 'type' field (%zu bytes): %.200s...", json_len, json_str);
+                    } else {
+                        ESP_LOGW(TAG, "⚠️ JSON missing 'type' field (%zu bytes): %s", json_len, json_str);
+                    }
+                    free(json_str);
+                } else {
+                    ESP_LOGW(TAG, "⚠️ JSON missing 'type' field");
+                }
                 cJSON_Delete(root);
-                if (json_str) free(json_str);
+                // Note: ws_reassembly_len already reset to 0 after successful parse above
                 break;
             }
             
@@ -545,7 +544,6 @@ static void websocket_event_handler(void *handler_args, esp_event_base_t base,
             }
             
             cJSON_Delete(root);
-            if (json_str) free(json_str);
         }
         break;
 
@@ -571,6 +569,24 @@ void app_main(void)
     ESP_LOGI(TAG, "xAI Grok Voice WebSocket Demo");
     ESP_LOGI(TAG, "================================");
 
+    // Allocate buffers in PSRAM to free internal RAM for TLS and WiFi
+    // WebSocket reassembly buffer (128KB)
+    ws_reassembly_buffer = (char *)heap_caps_malloc(WS_REASSEMBLY_SIZE, MALLOC_CAP_SPIRAM);
+    if (!ws_reassembly_buffer) {
+        ESP_LOGE(TAG, "Failed to allocate WebSocket buffer in PSRAM!");
+        ESP_LOGE(TAG, "Is PSRAM enabled? (CONFIG_SPIRAM=y in sdkconfig)");
+        return;
+    }
+    ESP_LOGI(TAG, "Allocated %d KB WebSocket buffer in PSRAM", WS_REASSEMBLY_SIZE / 1024);
+
+    // Audio PCM decode buffer (40KB)
+    pcm_buffer = (int16_t *)heap_caps_malloc(AUDIO_BUFFER_SIZE * sizeof(int16_t), MALLOC_CAP_SPIRAM);
+    if (!pcm_buffer) {
+        ESP_LOGE(TAG, "Failed to allocate audio buffer in PSRAM!");
+        return;
+    }
+    ESP_LOGI(TAG, "Allocated %d KB audio buffer in PSRAM", (AUDIO_BUFFER_SIZE * sizeof(int16_t)) / 1024);
+
     // Initialize NVS
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -595,7 +611,7 @@ void app_main(void)
     esp_websocket_client_config_t websocket_cfg = {
         .uri = WEBSOCKET_URI,
         .headers = auth_header,
-        .buffer_size = 4096,
+        .buffer_size = 16384,  // 16KB - enough for TCP chunks, we reassemble in static buffer
         .cert_pem = NULL,  // Use certificate bundle
         .crt_bundle_attach = esp_crt_bundle_attach,  // Enable certificate verification
         .network_timeout_ms = 60000,  // 60 seconds (for very weak WiFi signals)
