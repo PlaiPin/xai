@@ -36,7 +36,7 @@ static esp_err_t http_event_handler(esp_http_client_event_t *evt) {
                     client->response_size += evt->data_len;
                 }
             } else {
-                // Streaming response
+                // Streaming response (SSE text)
                 if (client->stream_callback) {
                     client->stream_callback(evt->data, evt->data_len,
                                           client->stream_user_data);

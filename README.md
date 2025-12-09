@@ -18,6 +18,7 @@ Production-ready ESP-IDF component for integrating [xAI's Grok models](https://x
 - **Real-Time Search** - Web, X (Twitter), News, and RSS grounding with citations
 - **Function Calling** - Client-side tool execution with parallel support
 - **Responses API** - Server-side agentic tools (webSearch, xSearch, codeExecution)
+- **Voice API** - WebSocket-based realtime voice conversations (see examples)
 - **Tokenization** - Count tokens and estimate memory usage
 - **Conversation Helpers** - Simplified multi-turn dialogue management
 
@@ -462,6 +463,7 @@ All examples include complete WiFi setup and error handling.
 | [web_search](examples/web_search) | Grounded responses | Web/X/News search, citations |
 | [tools](examples/tools) | Function calling | Client-side tools, parallel execution |
 | [image_generation](examples/image_generation) | Create images | Text-to-image, URL/base64 output |
+| [voice_demo_simple](examples/voice_demo_simple) | Real-time voice | WebSocket audio, I2S playback, ES8311 codec |
 
 ### Running Examples
 

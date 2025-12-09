@@ -36,6 +36,9 @@ static const char *TAG = "xai";
 // Configuration Helpers
 // ============================================================================
 
+// Voice API default URL
+#define XAI_DEFAULT_VOICE_BASE_URL "https://us-east-4.api.x.ai/voice-staging"
+
 xai_config_t xai_config_default(void) {
     xai_config_t config = {
         .api_key = NULL,

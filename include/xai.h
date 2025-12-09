@@ -11,6 +11,8 @@
 
 #pragma once
 
+#include "sdkconfig.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -855,6 +857,19 @@ size_t xai_estimate_memory(uint32_t token_count);
 const char* xai_err_to_string(xai_err_t err);
 
 /** @} */
+
+/**
+ * @note Voice API (WebSocket Realtime)
+ * 
+ * The Grok Voice API uses WebSocket for real-time bidirectional voice conversations.
+ * See examples/voice_demo_simple for a complete implementation using:
+ * - WebSocket client (wss://api.x.ai/v1/realtime)
+ * - Base64-encoded PCM audio streaming
+ * - I2S audio playback
+ * 
+ * The Voice API is not part of the core SDK as it requires WebSocket event loops
+ * and stateful session management. Use the example as a reference implementation.
+ */
 
 #ifdef __cplusplus
 }

@@ -264,5 +264,10 @@ menu "xAI Configuration"
 
     endmenu # Logging
 
+    comment "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    comment "Voice API: WebSocket-based (wss://api.x.ai/v1/realtime)"
+    comment "See examples/voice_demo_simple for complete implementation"
+    comment "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
 endmenu # xAI Configuration
 

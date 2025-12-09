@@ -1,5 +1,6 @@
-idf_component_register(
-    SRCS "src/xai.c"
+# Base source files
+set(COMPONENT_SRCS
+    "src/xai.c"
          "src/xai_http.c"
          "src/xai_json.c"
          "src/xai_chat.c"
@@ -11,6 +12,12 @@ idf_component_register(
          "src/xai_images.c"
          "src/xai_responses.c"
          "src/xai_error.c"
+)
+
+# Voice API note: WebSocket-based, see examples/voice_demo_simple
+
+idf_component_register(
+    SRCS ${COMPONENT_SRCS}
     INCLUDE_DIRS "include"
     PRIV_INCLUDE_DIRS "private_include"
     REQUIRES esp_http_client 
