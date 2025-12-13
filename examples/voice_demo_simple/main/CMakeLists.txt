@@ -1,5 +1,35 @@
 idf_component_register(
-    SRCS "voice_demo_simple.c"
-    INCLUDE_DIRS "."
+    SRCS 
+        "voice_demo_ui.c"
+        "i2c/i2c_manager.c"
+        "network/wifi_manager.c"
+        "network/websocket_client.c"
+        "audio/audio_init.c"
+        "audio/audio_decoder.c"
+        "audio/audio_playback.c"
+        "ui/ui_init.cpp"
+        "ui/ui_screens.cpp"
+        "ui/ui_events.cpp"
+    INCLUDE_DIRS 
+        "."
+        "config"
+        "i2c"
+        "network"
+        "audio"
+        "ui"
+    REQUIRES
+        nvs_flash
+        esp_wifi
+        esp_netif
+        esp_event
+        driver
+        esp_timer
+        esp_lcd
+        spi_flash
+        espressif__esp_websocket_client
+        espressif__cjson
+        espressif__es8311
+        lvgl__lvgl
+        SensorLib
+        esp_lcd_sh8601
 )
-

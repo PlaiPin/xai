@@ -4,6 +4,11 @@
  * 
  * Private header file - not exposed to users.
  * 
+ * This header is located in private_include/ and is made available to source files
+ * via PRIV_INCLUDE_DIRS in CMakeLists.txt. Source files include it as:
+ *     #include "xai_internal.h"
+ * The build system automatically searches the private_include/ directory.
+ * 
  * @copyright 2025
  * @license Apache-2.0
  */

@@ -16,6 +16,9 @@ set(COMPONENT_SRCS
 
 # Voice API note: WebSocket-based, see examples/voice_demo_simple
 
+# Component registration
+# - INCLUDE_DIRS: Public headers (include/xai.h) exposed to users
+# - PRIV_INCLUDE_DIRS: Private headers (private_include/xai_internal.h) for internal use only
 idf_component_register(
     SRCS ${COMPONENT_SRCS}
     INCLUDE_DIRS "include"
