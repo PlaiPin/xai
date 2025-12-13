@@ -110,8 +110,10 @@
 // ============================================================================
 // WebSocket Configuration (PSRAM)
 // ============================================================================
-// 128KB - handles all xAI audio deltas with reassembly
-#define WS_REASSEMBLY_SIZE (131072)
+// Reassembly buffer used to accumulate fragmented WebSocket DATA frames until we can parse JSON.
+// If this is too small, we can hit "Buffer overflow! Resetting..." and lose the in-flight response.
+// Increase as needed (PSRAM-backed).
+#define WS_REASSEMBLY_SIZE (262144)   // 256KB
 #define WS_BUFFER_SIZE     (16384)  // 16KB - for TCP chunks
 
 // ============================================================================
