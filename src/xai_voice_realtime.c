@@ -83,6 +83,15 @@ static void unlock_client(xai_voice_client_t c)
     }
 }
 
+static void demote_to_disconnected_locked(xai_voice_client_t c)
+{
+    if (!c) return;
+    c->connected = false;
+    c->session_ready = false;
+    c->in_turn = false;
+    xai_ws_assembler_reset(&c->assembler);
+}
+
 static void *xai_heap_malloc_prefer_psram(size_t bytes, bool prefer_psram)
 {
     if (bytes == 0) return NULL;
@@ -325,9 +334,7 @@ xai_err_t xai_voice_client_disconnect(xai_voice_client_t client)
     esp_websocket_client_stop(client->ws);
     esp_websocket_client_destroy(client->ws);
     client->ws = NULL;
-    client->connected = false;
-    client->session_ready = false;
-    client->in_turn = false;
+    demote_to_disconnected_locked(client);
     xai_ws_assembler_reset(&client->assembler);
     unlock_client(client);
     emit_state(client, XAI_VOICE_STATE_DISCONNECTED, NULL);
@@ -338,7 +345,16 @@ bool xai_voice_client_is_connected(xai_voice_client_t client)
 {
     if (!client) return false;
     lock_client(client);
-    bool v = client->connected && client->ws != NULL;
+    bool v = false;
+    if (client->ws) {
+        v = esp_websocket_client_is_connected(client->ws);
+        // Keep cached flag roughly in sync so callbacks/logic don't stay stale.
+        if (!v && client->connected) {
+            demote_to_disconnected_locked(client);
+        } else if (v) {
+            client->connected = true;
+        }
+    }
     unlock_client(client);
     return v;
 }
@@ -356,6 +372,14 @@ xai_err_t xai_voice_client_send_text_turn(xai_voice_client_t client, const char 
 {
     if (!client || !text) return XAI_ERR_INVALID_ARG;
     lock_client(client);
+    // Ground truth check: socket might have died during idle without a clean DISCONNECTED event.
+    if (!client->ws || !esp_websocket_client_is_connected(client->ws)) {
+        demote_to_disconnected_locked(client);
+        unlock_client(client);
+        emit_state(client, XAI_VOICE_STATE_DISCONNECTED, "send on dead socket");
+        return XAI_ERR_NOT_READY;
+    }
+
     if (!client->session_ready) {
         if (client->cfg.queue_turn_before_ready) {
             free(client->pending_text);
@@ -367,7 +391,15 @@ xai_err_t xai_voice_client_send_text_turn(xai_voice_client_t client, const char 
         return XAI_ERR_NOT_READY;
     }
     xai_err_t err = send_text_turn_locked(client, text);
+    if (err != XAI_OK) {
+        // Most common cause: websocket client internally knows it's not connected.
+        demote_to_disconnected_locked(client);
+    }
     unlock_client(client);
+
+    if (err != XAI_OK) {
+        emit_state(client, XAI_VOICE_STATE_DISCONNECTED, "send failed");
+    }
     return err;
 }
 
@@ -397,15 +429,22 @@ static void handle_json_message(xai_voice_client_t client, const char *json, siz
         emit_state(client, XAI_VOICE_STATE_SESSION_READY, NULL);
 
         // Send queued turn if any
+        xai_err_t queued_err = XAI_OK;
         lock_client(client);
         if (client->pending_text) {
             char *tmp = client->pending_text;
             client->pending_text = NULL;
-            xai_err_t err = send_text_turn_locked(client, tmp);
-            (void)err;
+            queued_err = send_text_turn_locked(client, tmp);
             free(tmp);
+            if (queued_err != XAI_OK) {
+                demote_to_disconnected_locked(client);
+            }
         }
         unlock_client(client);
+
+        if (queued_err != XAI_OK) {
+            emit_state(client, XAI_VOICE_STATE_DISCONNECTED, "queued send failed");
+        }
 
     } else if (strcmp(event_type, "response.created") == 0) {
         emit_state(client, XAI_VOICE_STATE_TURN_STARTED, NULL);
@@ -475,9 +514,14 @@ static void websocket_event_handler(void *handler_args, esp_event_base_t base, i
 
         lock_client(client);
         xai_err_t err = send_session_update_locked(client);
+        if (err != XAI_OK) {
+            // If we can't send session.update, we're not actually usable; demote so UI can recover.
+            demote_to_disconnected_locked(client);
+        }
         unlock_client(client);
         if (err != XAI_OK) {
             emit_state(client, XAI_VOICE_STATE_ERROR, "session.update send failed");
+            emit_state(client, XAI_VOICE_STATE_DISCONNECTED, "session.update send failed");
         }
         break;
 
@@ -492,7 +536,11 @@ static void websocket_event_handler(void *handler_args, esp_event_base_t base, i
         break;
 
     case WEBSOCKET_EVENT_ERROR:
+        lock_client(client);
+        demote_to_disconnected_locked(client);
+        unlock_client(client);
         emit_state(client, XAI_VOICE_STATE_ERROR, "websocket error");
+        emit_state(client, XAI_VOICE_STATE_DISCONNECTED, "websocket error");
         break;
 
     case WEBSOCKET_EVENT_DATA:
