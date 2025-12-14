@@ -166,6 +166,13 @@ void ui_set_button_state(button_state_t state)
     }
 }
 
+void ui_clear_transcript(void)
+{
+    if (transcript_label) {
+        lv_label_set_text(transcript_label, "");
+    }
+}
+
 void ui_append_transcript(const char *text)
 {
     if (transcript_label && text) {

@@ -59,6 +59,13 @@ void ui_update_status_label(const char *text);
 void ui_set_button_state(button_state_t state);
 
 /**
+ * @brief Clear transcript label
+ *
+ * Thread-safe: Must be called with ui_lock() held!
+ */
+void ui_clear_transcript(void);
+
+/**
  * @brief Append text to transcript label
  * 
  * Thread-safe: Must be called with ui_lock() held!

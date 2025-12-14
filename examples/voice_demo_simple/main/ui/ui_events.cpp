@@ -49,6 +49,7 @@ void ui_on_button_clicked(void)
     // Update UI (already locked by LVGL event handler)
     ui_set_button_state(BTN_STATE_CONNECTING);
     ui_update_status_label("Connecting...");
+    ui_clear_transcript();
     
     // Send message (this happens in separate thread)
     esp_err_t ret = ws_send_text_message(VOICE_DEFAULT_PROMPT);
@@ -87,7 +88,7 @@ void ui_on_websocket_status(const char *status)
             ui_update_status_label("Speaking...");
             
             // Clear transcript
-            ui_append_transcript("");  // Reset
+            ui_clear_transcript();
             
         } else if (strcmp(status, "done") == 0) {
             ui_set_button_state(BTN_STATE_READY);
