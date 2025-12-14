@@ -217,50 +217,78 @@ static void websocket_event_handler(void *handler_args, esp_event_base_t base,
 
     case WEBSOCKET_EVENT_DATA:
         if (data->data_len > 0) {
-            ESP_LOGD(TAG, "WS chunk: %d bytes (buffer=%zu)", data->data_len, ws_reassembly_len);
-            
-            cJSON *root = NULL;
-            
-            // Message reassembly logic
-            if (ws_reassembly_len > 0) {
-                // Continue buffering
-                if (ws_reassembly_len + data->data_len < WS_REASSEMBLY_SIZE) {
-                    memcpy(ws_reassembly_buffer + ws_reassembly_len, data->data_ptr, data->data_len);
-                    ws_reassembly_len += data->data_len;
-                    
-                    // Try parsing
-                    root = cJSON_ParseWithLength(ws_reassembly_buffer, ws_reassembly_len);
-                    if (root) {
-                        ESP_LOGI(TAG, "✓ Reassembled JSON (%zu bytes)", ws_reassembly_len);
-                        ws_reassembly_len = 0;
-                    } else {
-                        ESP_LOGD(TAG, "Still buffering... (%zu bytes)", ws_reassembly_len);
-                        break;
-                    }
-                } else {
-                    ESP_LOGW(TAG, "Buffer overflow! Resetting...");
-                    ws_reassembly_len = 0;
-                    break;
-                }
-            } else {
-                // Try direct parse first
-                root = cJSON_ParseWithLength((const char *)data->data_ptr, data->data_len);
-                
-                if (!root) {
-                    // Start buffering
-                    if (data->data_len < WS_REASSEMBLY_SIZE) {
-                        memcpy(ws_reassembly_buffer, data->data_ptr, data->data_len);
-                        ws_reassembly_len = data->data_len;
-                        ESP_LOGD(TAG, "Started buffering (%d bytes)", data->data_len);
-                    }
-                    break;
-                }
-            }
-            
-            if (!root) {
-                ESP_LOGW(TAG, "Failed to parse JSON");
+            // IMPORTANT:
+            // - The Grok Voice API sends JSON text messages (opcode=0x1)
+            // - The websocket layer can also deliver control frames (PING/PONG/CLOSE) which are NOT JSON.
+            //   If we append those bytes into our JSON reassembly buffer, it becomes "poisoned" and
+            //   future JSON parsing will fail (UI stuck in CONNECTING).
+            // - Large JSON messages may be fragmented across multiple WEBSOCKET_EVENT_DATA events;
+            //   use payload_len/payload_offset/fin to reassemble correctly.
+
+            // Only parse text frames as JSON
+            if (data->op_code != 0x01) {
+                ESP_LOGD(TAG, "Ignoring non-text WS frame: opcode=%u len=%d", (unsigned)data->op_code, data->data_len);
                 break;
             }
+
+            // New payload start: drop any previous partial data
+            if (data->payload_offset == 0) {
+                ws_reassembly_len = 0;
+            }
+
+            if (data->payload_len <= 0) {
+                ESP_LOGD(TAG, "Empty WS payload");
+                break;
+            }
+
+            if ((size_t)data->payload_len >= WS_REASSEMBLY_SIZE) {
+                ESP_LOGE(TAG, "WS payload too large: payload_len=%d max=%d", data->payload_len, WS_REASSEMBLY_SIZE);
+                ws_reassembly_len = 0;
+                if (status_callback) {
+                    status_callback("error: ws payload too large");
+                }
+                break;
+            }
+
+            // Bounds check for this chunk
+            if ((size_t)data->payload_offset + (size_t)data->data_len > WS_REASSEMBLY_SIZE) {
+                ESP_LOGE(TAG, "WS chunk overflow: off=%d len=%d max=%d", data->payload_offset, data->data_len, WS_REASSEMBLY_SIZE);
+                ws_reassembly_len = 0;
+                if (status_callback) {
+                    status_callback("error: ws chunk overflow");
+                }
+                break;
+            }
+
+            // Place this fragment into its proper offset.
+            memcpy(ws_reassembly_buffer + data->payload_offset, data->data_ptr, data->data_len);
+            size_t buffered = (size_t)data->payload_offset + (size_t)data->data_len;
+            if (buffered > ws_reassembly_len) {
+                ws_reassembly_len = buffered;
+            }
+
+            ESP_LOGD(TAG, "WS chunk: opcode=%u payload_len=%d off=%d len=%d buffered=%zu fin=%d",
+                     (unsigned)data->op_code, data->payload_len, data->payload_offset, data->data_len,
+                     ws_reassembly_len, data->fin ? 1 : 0);
+
+            // Wait until complete payload has been received.
+            if ((data->payload_offset + data->data_len) < data->payload_len || !data->fin) {
+                break;
+            }
+
+            // Parse complete JSON payload
+            cJSON *root = cJSON_ParseWithLength(ws_reassembly_buffer, (size_t)data->payload_len);
+            if (!root) {
+                ESP_LOGW(TAG, "Failed to parse complete JSON payload (len=%d). Dropping message.", data->payload_len);
+                ws_reassembly_len = 0;
+                if (status_callback) {
+                    status_callback("error: ws json parse failed");
+                }
+                break;
+            }
+
+            ESP_LOGI(TAG, "✓ Reassembled JSON (%d bytes)", data->payload_len);
+            ws_reassembly_len = 0;
             
             // Process JSON message
             cJSON *type = cJSON_GetObjectItem(root, "type");
@@ -283,6 +311,10 @@ static void websocket_event_handler(void *handler_args, esp_event_base_t base,
                     status_callback("speaking");
                 }
                 
+            } else if (strcmp(event_type, "ping") == 0) {
+                // Application-level ping (JSON). Safe to ignore.
+                ESP_LOGD(TAG, "Server ping event (JSON)");
+
             } else if (strcmp(event_type, "response.output_audio.delta") == 0) {
                 // AUDIO DATA!
                 cJSON *delta = cJSON_GetObjectItem(root, "delta");
