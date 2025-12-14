@@ -7,6 +7,7 @@
 #define UI_EVENTS_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -42,12 +43,13 @@ void ui_on_websocket_status(const char *status);
  * @brief Handle audio data received
  * 
  * Called from WebSocket event loop when audio delta arrives.
- * Decodes and plays the audio.
+ * Plays the decoded PCM16 audio.
  * 
- * @param base64 Base64-encoded audio data
- * @param len Length of base64 string
+ * @param pcm PCM16 mono samples
+ * @param sample_count Number of samples
+ * @param sample_rate_hz Sample rate (Hz)
  */
-void ui_on_audio_received(const char *base64, size_t len);
+void ui_on_audio_received(const int16_t *pcm, size_t sample_count, int sample_rate_hz);
 
 /**
  * @brief Handle transcript text received
@@ -59,8 +61,8 @@ void ui_on_audio_received(const char *base64, size_t len);
  */
 void ui_on_transcript_received(const char *text);
 
-// Forward declarations from websocket_client.h
-typedef void (*ws_audio_callback_t)(const char *base64, size_t len);
+// Forward declarations from websocket_client.h (kept here to avoid including networking headers)
+typedef void (*ws_audio_callback_t)(const int16_t *pcm, size_t sample_count, int sample_rate_hz);
 typedef void (*ws_status_callback_t)(const char *status_msg);
 typedef void (*ws_transcript_callback_t)(const char *text);
 

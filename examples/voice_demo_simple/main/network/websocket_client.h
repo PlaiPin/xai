@@ -7,6 +7,7 @@
 #define WEBSOCKET_CLIENT_H
 
 #include "esp_err.h"
+#include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
 
@@ -17,13 +18,14 @@ extern "C" {
 /**
  * @brief Callback function for audio data
  * 
- * Called when audio delta is received from the server.
+ * Called when decoded PCM16 audio is received from the server.
  * This callback is invoked from the WebSocket event loop.
  * 
- * @param base64 Base64-encoded audio data
- * @param len Length of base64 string
+ * @param pcm PCM16 little-endian mono samples
+ * @param sample_count Number of int16 samples
+ * @param sample_rate_hz Sample rate (Hz) configured for the session
  */
-typedef void (*ws_audio_callback_t)(const char *base64, size_t len);
+typedef void (*ws_audio_callback_t)(const int16_t *pcm, size_t sample_count, int sample_rate_hz);
 
 /**
  * @brief Callback function for status updates

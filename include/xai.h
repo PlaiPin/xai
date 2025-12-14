@@ -45,7 +45,10 @@ typedef enum {
     XAI_ERR_RATE_LIMIT,             /**< Rate limit exceeded */
     XAI_ERR_TIMEOUT,                /**< Request timeout */
     XAI_ERR_API_ERROR,              /**< API error response */
-    XAI_ERR_NOT_SUPPORTED           /**< Feature not supported */
+    XAI_ERR_NOT_SUPPORTED,          /**< Feature not supported */
+    XAI_ERR_NOT_READY,              /**< Operation requested before ready (e.g. session not configured yet) */
+    XAI_ERR_WS_FAILED,              /**< WebSocket operation failed */
+    XAI_ERR_BUSY                    /**< Client busy (e.g. turn already in progress) */
 } xai_err_t;
 
 /**

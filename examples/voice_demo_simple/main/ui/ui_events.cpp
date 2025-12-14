@@ -7,38 +7,22 @@
 #include "ui_init.h"
 #include "ui_screens.h"
 #include "network/websocket_client.h"
-#include "audio/audio_decoder.h"
 #include "audio/audio_playback.h"
 #include "config/app_config.h"
 #include "esp_log.h"
-#include "esp_heap_caps.h"
 
 static const char *TAG = "ui_events";
 
-// Audio buffer for decoding (allocated in PSRAM)
-static int16_t *pcm_buffer = NULL;
-
 // Forward declarations (these are registered as callbacks)
-static void on_audio_cb(const char *base64, size_t len);
+static void on_audio_cb(const int16_t *pcm, size_t sample_count, int sample_rate_hz);
 static void on_status_cb(const char *status);
 static void on_transcript_cb(const char *text);
 
 void ui_setup_event_handlers(void)
 {
     ESP_LOGI(TAG, "Setting up event handlers...");
-    
-    // Allocate audio PCM buffer in PSRAM
-    pcm_buffer = (int16_t *)heap_caps_malloc(AUDIO_BUFFER_SIZE * sizeof(int16_t), 
-                                              MALLOC_CAP_SPIRAM);
-    if (!pcm_buffer) {
-        ESP_LOGE(TAG, "Failed to allocate PCM buffer in PSRAM!");
-        return;
-    }
-    ESP_LOGI(TAG, "Allocated %d KB PCM buffer in PSRAM", 
-             (AUDIO_BUFFER_SIZE * sizeof(int16_t)) / 1024);
-    
-    // Register callbacks with WebSocket client
-    // Note: ws_init will be called later in main
+    // Note: WebSocket client is initialized later in main. Audio deltas are already decoded
+    // to PCM16 by the xAI SDK, so we do not allocate a base64 decode buffer here.
     ESP_LOGI(TAG, "Event handlers ready");
 }
 
@@ -109,39 +93,25 @@ void ui_on_websocket_status(const char *status)
     }
 }
 
-void ui_on_audio_received(const char *base64, size_t len)
+void ui_on_audio_received(const int16_t *pcm, size_t sample_count, int sample_rate_hz)
 {
-    if (!base64 || len == 0 || !pcm_buffer) {
-        ESP_LOGW(TAG, "Invalid audio data");
+    (void)sample_rate_hz;
+    if (!pcm || sample_count == 0) {
+        ESP_LOGW(TAG, "Invalid PCM audio data");
         return;
     }
-    
-    ESP_LOGI(TAG, "Audio received: %zu bytes", len);
-    
-    // Decode base64 to PCM (no UI lock needed)
-    int samples = audio_decode_base64(base64, len, pcm_buffer, AUDIO_BUFFER_SIZE);
-    
-    if (samples > 0) {
-        // Play audio (blocking, no UI lock needed)
-        esp_err_t ret = audio_play_pcm(pcm_buffer, samples);
-        
-        if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to play audio");
-            
-            // Update UI on error
-            if (ui_lock(1000)) {
-                ui_set_button_state(BTN_STATE_ERROR);
-                ui_update_status_label("Error: Playback failed");
-                ui_unlock();
-            }
-        }
-    } else {
-        ESP_LOGE(TAG, "Failed to decode audio (samples=%d)", samples);
-        
+
+    ESP_LOGI(TAG, "Audio received: %zu samples", sample_count);
+
+    // Play audio (blocking, no UI lock needed)
+    esp_err_t ret = audio_play_pcm(pcm, sample_count);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to play audio");
+
         // Update UI on error
         if (ui_lock(1000)) {
             ui_set_button_state(BTN_STATE_ERROR);
-            ui_update_status_label("Error: Decode failed");
+            ui_update_status_label("Error: Playback failed");
             ui_unlock();
         }
     }
@@ -163,9 +133,9 @@ void ui_on_transcript_received(const char *text)
 }
 
 // Internal callback wrappers (called from WebSocket thread)
-static void on_audio_cb(const char *base64, size_t len)
+static void on_audio_cb(const int16_t *pcm, size_t sample_count, int sample_rate_hz)
 {
-    ui_on_audio_received(base64, len);
+    ui_on_audio_received(pcm, sample_count, sample_rate_hz);
 }
 
 static void on_status_cb(const char *status)

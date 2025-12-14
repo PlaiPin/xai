@@ -1,37 +1,94 @@
 /**
  * @file websocket_client.c
- * @brief xAI Grok Voice API WebSocket client implementation
+ * @brief Compatibility wrapper for the voice demo example.
+ *
+ * IMPORTANT:
+ * The actual Grok Voice Realtime WebSocket implementation lives in the xAI SDK:
+ *   - `xai/include/xai_voice_realtime.h`
+ *   - `xai/src/xai_voice_realtime.c`
+ *
+ * This example-level file preserves the demo's existing `ws_*` API by delegating
+ * to the SDK client.
  */
 
 #include "websocket_client.h"
 #include "config/app_config.h"
 #include "esp_log.h"
-#include "esp_websocket_client.h"
-#include "esp_crt_bundle.h"
-#include "esp_heap_caps.h"
-#include "cJSON.h"
+#include "xai_voice_realtime.h"
+
 #include <string.h>
+#include <stdlib.h>
 
 static const char *TAG = "websocket_client";
 
-// WebSocket client handle
-static esp_websocket_client_handle_t client = NULL;
-
-// Callbacks
+// Demo callbacks
 static ws_audio_callback_t audio_callback = NULL;
 static ws_status_callback_t status_callback = NULL;
 static ws_transcript_callback_t transcript_callback = NULL;
 
-// Message reassembly buffer (allocated in PSRAM)
-static char *ws_reassembly_buffer = NULL;
-static size_t ws_reassembly_len = 0;
+// SDK client
+static xai_voice_client_t voice = NULL;
 
-// Connection state
-static bool is_connected = false;
+static void sdk_on_state(xai_voice_client_t client, xai_voice_state_t state, const char *detail, void *user_ctx)
+{
+    (void)client;
+    (void)user_ctx;
 
-// Forward declarations
-static void websocket_event_handler(void *handler_args, esp_event_base_t base, 
-                                   int32_t event_id, void *event_data);
+    if (!status_callback) return;
+
+    switch (state) {
+    case XAI_VOICE_STATE_CONNECTED:
+        status_callback("connected");
+        break;
+    case XAI_VOICE_STATE_SESSION_READY:
+        status_callback("ready");
+        break;
+    case XAI_VOICE_STATE_TURN_STARTED:
+        status_callback("speaking");
+        break;
+    case XAI_VOICE_STATE_TURN_DONE:
+        status_callback("done");
+        break;
+    case XAI_VOICE_STATE_DISCONNECTED:
+        status_callback("disconnected");
+        break;
+    case XAI_VOICE_STATE_ERROR:
+        if (detail && detail[0]) {
+            char buf[128];
+            snprintf(buf, sizeof(buf), "error: %s", detail);
+            status_callback(buf);
+        } else {
+            status_callback("error: unknown");
+        }
+        break;
+    default:
+        break;
+    }
+}
+
+static void sdk_on_transcript(xai_voice_client_t client, const char *utf8, size_t len, void *user_ctx)
+{
+    (void)client;
+    (void)user_ctx;
+    if (transcript_callback && utf8 && len) {
+        // Ensure null-termination for callback expectations
+        char tmp[256];
+        size_t n = len < sizeof(tmp) - 1 ? len : sizeof(tmp) - 1;
+        memcpy(tmp, utf8, n);
+        tmp[n] = '\0';
+        transcript_callback(tmp);
+    }
+}
+
+static void sdk_on_pcm16(xai_voice_client_t client, const int16_t *samples, size_t sample_count, int sample_rate_hz, void *user_ctx)
+{
+    (void)client;
+    (void)user_ctx;
+    (void)sample_rate_hz;
+    if (audio_callback && samples && sample_count) {
+        audio_callback(samples, sample_count, sample_rate_hz);
+    }
+}
 
 esp_err_t ws_init(const char *api_key,
                   ws_audio_callback_t audio_cb,
@@ -42,337 +99,101 @@ esp_err_t ws_init(const char *api_key,
         ESP_LOGE(TAG, "API key and audio callback are required");
         return ESP_ERR_INVALID_ARG;
     }
-
-    if (client) {
+    if (voice) {
         ESP_LOGW(TAG, "WebSocket already initialized");
         return ESP_OK;
     }
 
-    ESP_LOGI(TAG, "Initializing WebSocket client...");
-
-    // Store callbacks
     audio_callback = audio_cb;
     status_callback = status_cb;
     transcript_callback = transcript_cb;
 
-    // Allocate reassembly buffer in PSRAM
-    ws_reassembly_buffer = (char *)heap_caps_malloc(WS_REASSEMBLY_SIZE, MALLOC_CAP_SPIRAM);
-    if (!ws_reassembly_buffer) {
-        ESP_LOGE(TAG, "Failed to allocate WebSocket buffer in PSRAM!");
-        return ESP_ERR_NO_MEM;
-    }
-    ESP_LOGI(TAG, "Allocated %d KB WebSocket buffer in PSRAM", WS_REASSEMBLY_SIZE / 1024);
-
-    // Configure WebSocket client with authentication
-    char auth_header[1024];
-    snprintf(auth_header, sizeof(auth_header), 
-             "Authorization: Bearer %s\r\n"
-             "Content-Type: application/json\r\n",
-             api_key);
-
-    esp_websocket_client_config_t websocket_cfg = {
+    xai_voice_config_t cfg = {
         .uri = WEBSOCKET_URI,
-        .headers = auth_header,
-        .buffer_size = WS_BUFFER_SIZE,
-        .cert_pem = NULL,
-        .crt_bundle_attach = esp_crt_bundle_attach,
+        .api_key = api_key,
         .network_timeout_ms = 60000,
         .reconnect_timeout_ms = 15000,
+        .ws_rx_buffer_size = WS_BUFFER_SIZE,
+        .max_message_size = WS_REASSEMBLY_SIZE,
+        .pcm_buffer_bytes = 128 * 1024,
+        .prefer_psram = true,
+        .queue_turn_before_ready = true,
+        .session = {
+            .voice = VOICE_NAME,
+            .instructions = "You are a helpful AI assistant. Be concise.",
+            .sample_rate_hz = 16000,
+            .server_vad = true,
+        },
     };
 
-    ESP_LOGI(TAG, "Connecting to: %s", WEBSOCKET_URI);
-    client = esp_websocket_client_init(&websocket_cfg);
-    if (!client) {
-        ESP_LOGE(TAG, "Failed to initialize WebSocket client");
-        heap_caps_free(ws_reassembly_buffer);
-        ws_reassembly_buffer = NULL;
+    xai_voice_callbacks_t cbs = {
+        .on_state = sdk_on_state,
+        .on_transcript_delta = sdk_on_transcript,
+        .on_pcm16 = sdk_on_pcm16,
+        .on_event_json = NULL,
+    };
+
+    voice = xai_voice_client_create(&cfg, &cbs, NULL);
+    if (!voice) {
+        ESP_LOGE(TAG, "Failed to create xAI voice realtime client");
         return ESP_FAIL;
     }
 
-    esp_websocket_register_events(client, WEBSOCKET_EVENT_ANY, websocket_event_handler, NULL);
-    esp_websocket_client_start(client);
+    ESP_LOGI(TAG, "Connecting to: %s", WEBSOCKET_URI);
+    xai_err_t err = xai_voice_client_connect(voice);
+    if (err != XAI_OK) {
+        ESP_LOGE(TAG, "Failed to start voice client: %s", xai_err_to_string(err));
+        xai_voice_client_destroy(voice);
+        voice = NULL;
+        return ESP_FAIL;
+    }
 
-    ESP_LOGI(TAG, "WebSocket client started");
+    ESP_LOGI(TAG, "WebSocket client started (SDK)");
     return ESP_OK;
 }
 
 esp_err_t ws_send_text_message(const char *message)
 {
-    if (!client || !is_connected) {
-        ESP_LOGE(TAG, "WebSocket not connected");
+    if (!voice) {
+        ESP_LOGE(TAG, "WebSocket client not initialized");
         return ESP_FAIL;
     }
-
     if (!message) {
         ESP_LOGE(TAG, "Invalid message");
         return ESP_ERR_INVALID_ARG;
     }
-
     ESP_LOGI(TAG, "Sending text message: %s", message);
-
-    // Create conversation item
-    char text_message[512];
-    snprintf(text_message, sizeof(text_message),
-            "{"
-            "\"type\":\"conversation.item.create\","
-            "\"item\":{"
-                "\"type\":\"message\","
-                "\"role\":\"user\","
-                "\"content\":[{\"type\":\"input_text\",\"text\":\"%s\"}]"
-            "}}", message);
-    
-    int ret = esp_websocket_client_send_text(client, text_message, strlen(text_message), portMAX_DELAY);
-    if (ret < 0) {
-        ESP_LOGE(TAG, "Failed to send text message");
+    xai_err_t err = xai_voice_client_send_text_turn(voice, message);
+    if (err != XAI_OK) {
+        ESP_LOGE(TAG, "Failed to send text turn: %s", xai_err_to_string(err));
         return ESP_FAIL;
     }
-
-    // Small delay
-    vTaskDelay(pdMS_TO_TICKS(100));
-
-    // Request response
-    const char *response_create = "{\"type\":\"response.create\"}";
-    ret = esp_websocket_client_send_text(client, response_create, strlen(response_create), portMAX_DELAY);
-    if (ret < 0) {
-        ESP_LOGE(TAG, "Failed to request response");
-        return ESP_FAIL;
-    }
-
     ESP_LOGI(TAG, "Message sent, response requested");
     return ESP_OK;
 }
 
 bool ws_is_connected(void)
 {
-    return is_connected && client != NULL;
+    return voice && xai_voice_client_is_connected(voice);
 }
 
 esp_err_t ws_disconnect(void)
 {
-    if (client) {
-        esp_websocket_client_stop(client);
-        is_connected = false;
-        ESP_LOGI(TAG, "WebSocket disconnected");
-        return ESP_OK;
-    }
-    return ESP_FAIL;
+    if (!voice) return ESP_FAIL;
+    xai_voice_client_disconnect(voice);
+    ESP_LOGI(TAG, "WebSocket disconnected");
+    return ESP_OK;
 }
 
 void ws_deinit(void)
 {
-    if (client) {
-        esp_websocket_client_destroy(client);
-        client = NULL;
+    if (voice) {
+        xai_voice_client_destroy(voice);
+        voice = NULL;
     }
-
-    if (ws_reassembly_buffer) {
-        heap_caps_free(ws_reassembly_buffer);
-        ws_reassembly_buffer = NULL;
-    }
-
     audio_callback = NULL;
     status_callback = NULL;
     transcript_callback = NULL;
-    is_connected = false;
-
     ESP_LOGI(TAG, "WebSocket deinitialized");
-}
-
-// WebSocket event handler
-static void websocket_event_handler(void *handler_args, esp_event_base_t base, 
-                                   int32_t event_id, void *event_data)
-{
-    esp_websocket_event_data_t *data = (esp_websocket_event_data_t *)event_data;
-    
-    switch (event_id) {
-    case WEBSOCKET_EVENT_CONNECTED:
-        ESP_LOGI(TAG, "WebSocket connected!");
-        is_connected = true;
-        
-        if (status_callback) {
-            status_callback("connected");
-        }
-        
-        // Send session configuration
-        const char *session_config = 
-            "{"
-            "\"type\":\"session.update\","
-            "\"session\":{"
-                "\"voice\":\"" VOICE_NAME "\","
-                "\"instructions\":\"You are a helpful AI assistant. Be concise.\","
-                "\"turn_detection\":{\"type\":\"server_vad\"},"
-                "\"audio\":{"
-                    "\"input\":{"
-                        "\"format\":{\"type\":\"audio/pcm\",\"rate\":16000}"
-                    "},"
-                    "\"output\":{"
-                        "\"format\":{\"type\":\"audio/pcm\",\"rate\":16000}"
-                    "}"
-                "}"
-            "}}";
-        
-        esp_websocket_client_send_text(client, session_config, strlen(session_config), portMAX_DELAY);
-        ESP_LOGI(TAG, "Sent session config (voice=%s, audio=16kHz PCM)", VOICE_NAME);
-        break;
-
-    case WEBSOCKET_EVENT_DATA:
-        if (data->data_len > 0) {
-            // IMPORTANT:
-            // - The Grok Voice API sends JSON text messages (opcode=0x1)
-            // - The websocket layer can also deliver control frames (PING/PONG/CLOSE) which are NOT JSON.
-            //   If we append those bytes into our JSON reassembly buffer, it becomes "poisoned" and
-            //   future JSON parsing will fail (UI stuck in CONNECTING).
-            // - Large JSON messages may be fragmented across multiple WEBSOCKET_EVENT_DATA events;
-            //   use payload_len/payload_offset/fin to reassemble correctly.
-
-            // Only parse text frames as JSON
-            if (data->op_code != 0x01) {
-                ESP_LOGD(TAG, "Ignoring non-text WS frame: opcode=%u len=%d", (unsigned)data->op_code, data->data_len);
-                break;
-            }
-
-            // New payload start: drop any previous partial data
-            if (data->payload_offset == 0) {
-                ws_reassembly_len = 0;
-            }
-
-            if (data->payload_len <= 0) {
-                ESP_LOGD(TAG, "Empty WS payload");
-                break;
-            }
-
-            if ((size_t)data->payload_len >= WS_REASSEMBLY_SIZE) {
-                ESP_LOGE(TAG, "WS payload too large: payload_len=%d max=%d", data->payload_len, WS_REASSEMBLY_SIZE);
-                ws_reassembly_len = 0;
-                if (status_callback) {
-                    status_callback("error: ws payload too large");
-                }
-                break;
-            }
-
-            // Bounds check for this chunk
-            if ((size_t)data->payload_offset + (size_t)data->data_len > WS_REASSEMBLY_SIZE) {
-                ESP_LOGE(TAG, "WS chunk overflow: off=%d len=%d max=%d", data->payload_offset, data->data_len, WS_REASSEMBLY_SIZE);
-                ws_reassembly_len = 0;
-                if (status_callback) {
-                    status_callback("error: ws chunk overflow");
-                }
-                break;
-            }
-
-            // Place this fragment into its proper offset.
-            memcpy(ws_reassembly_buffer + data->payload_offset, data->data_ptr, data->data_len);
-            size_t buffered = (size_t)data->payload_offset + (size_t)data->data_len;
-            if (buffered > ws_reassembly_len) {
-                ws_reassembly_len = buffered;
-            }
-
-            ESP_LOGD(TAG, "WS chunk: opcode=%u payload_len=%d off=%d len=%d buffered=%zu fin=%d",
-                     (unsigned)data->op_code, data->payload_len, data->payload_offset, data->data_len,
-                     ws_reassembly_len, data->fin ? 1 : 0);
-
-            // Wait until complete payload has been received.
-            if ((data->payload_offset + data->data_len) < data->payload_len || !data->fin) {
-                break;
-            }
-
-            // Parse complete JSON payload
-            cJSON *root = cJSON_ParseWithLength(ws_reassembly_buffer, (size_t)data->payload_len);
-            if (!root) {
-                ESP_LOGW(TAG, "Failed to parse complete JSON payload (len=%d). Dropping message.", data->payload_len);
-                ws_reassembly_len = 0;
-                if (status_callback) {
-                    status_callback("error: ws json parse failed");
-                }
-                break;
-            }
-
-            ESP_LOGI(TAG, "✓ Reassembled JSON (%d bytes)", data->payload_len);
-            ws_reassembly_len = 0;
-            
-            // Process JSON message
-            cJSON *type = cJSON_GetObjectItem(root, "type");
-            if (!type || !type->valuestring) {
-                ESP_LOGW(TAG, "JSON missing 'type' field");
-                cJSON_Delete(root);
-                break;
-            }
-            
-            const char *event_type = type->valuestring;
-            ESP_LOGD(TAG, "Event: %s", event_type);
-            
-            // Handle different event types
-            if (strcmp(event_type, "session.updated") == 0) {
-                ESP_LOGI(TAG, "Session configured");
-                if (status_callback) {
-                    // Signal UI that the session is ready for turns (different from response "done")
-                    status_callback("ready");
-                }
-                
-            } else if (strcmp(event_type, "response.created") == 0) {
-                ESP_LOGI(TAG, "Response started");
-                if (status_callback) {
-                    status_callback("speaking");
-                }
-                
-            } else if (strcmp(event_type, "ping") == 0) {
-                // Application-level ping (JSON). Safe to ignore.
-                ESP_LOGD(TAG, "Server ping event (JSON)");
-
-            } else if (strcmp(event_type, "response.output_audio.delta") == 0) {
-                // AUDIO DATA!
-                cJSON *delta = cJSON_GetObjectItem(root, "delta");
-                if (delta && delta->valuestring) {
-                    size_t base64_len = strlen(delta->valuestring);
-                    ESP_LOGI(TAG, "🔊 Audio delta (%zu bytes)", base64_len);
-                    
-                    if (audio_callback) {
-                        audio_callback(delta->valuestring, base64_len);
-                    }
-                }
-                
-            } else if (strcmp(event_type, "response.output_audio_transcript.delta") == 0) {
-                // Transcript text
-                cJSON *delta = cJSON_GetObjectItem(root, "delta");
-                if (delta && delta->valuestring && transcript_callback) {
-                    transcript_callback(delta->valuestring);
-                }
-                
-            } else if (strcmp(event_type, "response.output_audio_transcript.done") == 0) {
-                ESP_LOGI(TAG, "Transcript complete");
-                
-            } else if (strcmp(event_type, "response.output_audio.done") == 0) {
-                ESP_LOGI(TAG, "Audio stream complete");
-                
-            } else if (strcmp(event_type, "response.done") == 0) {
-                ESP_LOGI(TAG, "✓ Response complete");
-                if (status_callback) {
-                    status_callback("done");
-                }
-            }
-            
-            cJSON_Delete(root);
-        }
-        break;
-
-    case WEBSOCKET_EVENT_ERROR:
-        ESP_LOGE(TAG, "WebSocket error");
-        is_connected = false;
-        if (status_callback) {
-            status_callback("error: connection error");
-        }
-        break;
-
-    case WEBSOCKET_EVENT_DISCONNECTED:
-        ESP_LOGI(TAG, "WebSocket disconnected");
-        is_connected = false;
-        if (status_callback) {
-            status_callback("disconnected");
-        }
-        break;
-
-    default:
-        break;
-    }
 }
 

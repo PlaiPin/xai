@@ -33,6 +33,12 @@ const char* xai_err_to_string(xai_err_t err) {
             return "Operation timed out";
         case XAI_ERR_API_ERROR:
             return "API error";
+        case XAI_ERR_NOT_READY:
+            return "Not ready";
+        case XAI_ERR_WS_FAILED:
+            return "WebSocket operation failed";
+        case XAI_ERR_BUSY:
+            return "Busy";
         default:
             return "Unknown error";
     }
