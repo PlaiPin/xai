@@ -16,7 +16,7 @@ static lv_obj_t *main_button = NULL;
 static lv_obj_t *button_label = NULL;
 static lv_obj_t *transcript_label = NULL;
 static lv_anim_t button_anim;
-static button_state_t current_state = BTN_STATE_READY;
+static button_state_t current_state = BTN_STATE_CONNECTING;
 
 // Button callback storage
 static button_click_callback_t button_callback = NULL;
@@ -61,7 +61,7 @@ lv_obj_t* ui_create_main_screen(button_click_callback_t btn_cb)
     
     // Status label (top)
     status_label = lv_label_create(screen);
-    lv_label_set_text(status_label, "Ready");
+    lv_label_set_text(status_label, "Starting...");
     lv_obj_set_style_text_color(status_label, lv_color_hex(0xFFFFFF), 0);
     lv_obj_set_style_text_font(status_label, LV_FONT_DEFAULT, 0);
     lv_obj_align(status_label, LV_ALIGN_TOP_MID, 0, 30);
@@ -93,6 +93,9 @@ lv_obj_t* ui_create_main_screen(button_click_callback_t btn_cb)
     
     // Load screen
     lv_scr_load(screen);
+
+    // Default to disabled until WebSocket is connected + session.updated received.
+    ui_set_button_state(BTN_STATE_CONNECTING);
     
     ESP_LOGI(TAG, "Main screen created");
     return screen;

@@ -73,8 +73,15 @@ void ui_on_websocket_status(const char *status)
     // Update UI (must acquire lock!)
     if (ui_lock(1000)) {
         if (strcmp(status, "connected") == 0) {
+            // Connected at transport level, but may not be session-configured yet.
+            ui_set_button_state(BTN_STATE_CONNECTING);
             ui_update_status_label("Connected");
             
+        } else if (strcmp(status, "ready") == 0) {
+            // Session configured (session.updated received) -> safe to enable the button.
+            ui_set_button_state(BTN_STATE_READY);
+            ui_update_status_label("Ready");
+
         } else if (strcmp(status, "speaking") == 0) {
             ui_set_button_state(BTN_STATE_SPEAKING);
             ui_update_status_label("Speaking...");

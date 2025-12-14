@@ -304,6 +304,10 @@ static void websocket_event_handler(void *handler_args, esp_event_base_t base,
             // Handle different event types
             if (strcmp(event_type, "session.updated") == 0) {
                 ESP_LOGI(TAG, "Session configured");
+                if (status_callback) {
+                    // Signal UI that the session is ready for turns (different from response "done")
+                    status_callback("ready");
+                }
                 
             } else if (strcmp(event_type, "response.created") == 0) {
                 ESP_LOGI(TAG, "Response started");
