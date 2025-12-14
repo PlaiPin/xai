@@ -38,6 +38,20 @@ static const char *TAG = "voice_demo_ui";
 
 void app_main(void)
 {
+    // If global log level is set to DEBUG/VERBOSE, these tags can produce enough UART output
+    // to starve real-time tasks (audio playback becomes choppy). Clamp the noisiest ones.
+    esp_log_level_set("spi_master", ESP_LOG_WARN);
+    esp_log_level_set("bus_lock", ESP_LOG_WARN);
+    esp_log_level_set("transport_ws", ESP_LOG_WARN);
+    esp_log_level_set("transport_base", ESP_LOG_WARN);
+    esp_log_level_set("event", ESP_LOG_WARN);
+    // Keep our app logs visible at INFO.
+    esp_log_level_set("websocket_client", ESP_LOG_INFO);
+    esp_log_level_set("audio_playback", ESP_LOG_INFO);
+    esp_log_level_set("audio_decoder", ESP_LOG_INFO);
+    esp_log_level_set("ui_init", ESP_LOG_INFO);
+    esp_log_level_set("ui_events", ESP_LOG_INFO);
+
     ESP_LOGI(TAG, "=================================================");
     ESP_LOGI(TAG, "xAI Grok Voice Demo with LVGL UI");
     ESP_LOGI(TAG, "=================================================");
@@ -133,9 +147,10 @@ void app_main(void)
                             ui_get_transcript_callback()));
     ESP_LOGI(TAG, "✓ WebSocket client initialized");
     
-    // Update UI to ready state
+    // WebSocket connect + session.update happen asynchronously; do NOT enable the button yet.
+    // The UI will transition to READY when we receive "session.updated" (status="ready").
     if (ui_lock(1000)) {
-        ui_update_status_label("Ready!\nTap button to talk to Grok");
+        ui_update_status_label("Connecting to Grok...");
         ui_unlock();
     }
 
