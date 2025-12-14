@@ -1,5 +1,5 @@
 /**
- * @file voice_demo_ui.c
+ * @file main.c
  * @brief Main application entry point for xAI Voice Demo with LVGL UI
  * 
  * This application demonstrates the xAI Grok Voice API with a touch UI:

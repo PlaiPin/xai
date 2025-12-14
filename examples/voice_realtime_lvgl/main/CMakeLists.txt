@@ -1,6 +1,6 @@
 idf_component_register(
     SRCS 
-        "voice_demo_ui.c"
+        "main.c"
         "i2c/i2c_manager.c"
         "network/wifi_manager.c"
         "audio/audio_init.c"
