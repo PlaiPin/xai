@@ -8,6 +8,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "esp_err.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -20,6 +21,22 @@ extern "C" {
  * to handle audio, status, and transcript updates.
  */
 void ui_setup_event_handlers(void);
+
+/**
+ * @brief Initialize and connect the xAI Voice Realtime SDK client.
+ *
+ * Creates the SDK client and starts the WebSocket connection. The UI will
+ * transition to READY once the SDK reports SESSION_READY.
+ *
+ * @param api_key xAI API key
+ * @return ESP_OK on success, error code otherwise
+ */
+esp_err_t ui_voice_start(const char *api_key);
+
+/**
+ * @brief Check whether the voice realtime client is connected (transport).
+ */
+bool ui_voice_is_connected(void);
 
 /**
  * @brief Handle button click event
@@ -60,32 +77,6 @@ void ui_on_audio_received(const int16_t *pcm, size_t sample_count, int sample_ra
  * @param text Transcript text fragment
  */
 void ui_on_transcript_received(const char *text);
-
-// Forward declarations from websocket_client.h (kept here to avoid including networking headers)
-typedef void (*ws_audio_callback_t)(const int16_t *pcm, size_t sample_count, int sample_rate_hz);
-typedef void (*ws_status_callback_t)(const char *status_msg);
-typedef void (*ws_transcript_callback_t)(const char *text);
-
-/**
- * @brief Get audio callback for WebSocket client
- * 
- * @return Audio callback function pointer
- */
-ws_audio_callback_t ui_get_audio_callback(void);
-
-/**
- * @brief Get status callback for WebSocket client
- * 
- * @return Status callback function pointer
- */
-ws_status_callback_t ui_get_status_callback(void);
-
-/**
- * @brief Get transcript callback for WebSocket client
- * 
- * @return Transcript callback function pointer
- */
-ws_transcript_callback_t ui_get_transcript_callback(void);
 
 #ifdef __cplusplus
 }

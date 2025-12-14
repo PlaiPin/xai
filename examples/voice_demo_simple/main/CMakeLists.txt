@@ -3,7 +3,6 @@ idf_component_register(
         "voice_demo_ui.c"
         "i2c/i2c_manager.c"
         "network/wifi_manager.c"
-        "network/websocket_client.c"
         "audio/audio_init.c"
         "audio/audio_playback.c"
         "ui/ui_init.cpp"
