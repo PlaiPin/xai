@@ -6,6 +6,7 @@
 #include "ui_init.h"
 #include "config/app_config.h"
 #include "i2c/i2c_manager.h"
+#include "ui/ui_events.h"
 #include "esp_log.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_vendor.h"
@@ -353,6 +354,9 @@ static void lvgl_port_task(void *arg)
     while (1) {
         if (ui_lock(-1)) {
             task_delay_ms = lv_timer_handler();
+            // Apply any pending UI updates from other tasks (SDK callbacks, audio, etc.).
+            // Important: do this on the LVGL task to avoid ui_lock re-entrancy.
+            ui_events_process_lvgl();
             ui_unlock();
         }
         

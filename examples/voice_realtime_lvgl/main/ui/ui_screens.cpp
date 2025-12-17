@@ -40,7 +40,7 @@ static void button_event_cb(lv_event_t *e)
         ESP_LOGI(TAG, "Button event: RELEASED (state=%d)", current_state);
     } else if (code == LV_EVENT_CLICKED) {
         ESP_LOGI(TAG, "Button event: CLICKED (state=%d)", current_state);
-        if (button_callback && current_state == BTN_STATE_READY) {
+        if (button_callback && (current_state == BTN_STATE_READY || current_state == BTN_STATE_DISCONNECTED || current_state == BTN_STATE_ERROR)) {
             button_callback();
         } else {
             ESP_LOGW(TAG, "Button not ready (state=%d, cb=%p)", current_state, button_callback);
@@ -154,6 +154,14 @@ void ui_set_button_state(button_state_t state)
         lv_anim_start(&button_anim);
         
         ESP_LOGI(TAG, "Button state: SPEAKING (pulsing)");
+        break;
+
+    case BTN_STATE_DISCONNECTED:
+        lv_obj_set_style_bg_color(main_button, lv_color_hex(0xFF9800), 0);  // Orange
+        lv_obj_set_style_bg_opa(main_button, LV_OPA_COVER, 0);
+        lv_label_set_text(button_label, LV_SYMBOL_REFRESH "\nTap to reconnect");
+        lv_obj_clear_state(main_button, LV_STATE_DISABLED);
+        ESP_LOGI(TAG, "Button state: DISCONNECTED");
         break;
         
     case BTN_STATE_ERROR:

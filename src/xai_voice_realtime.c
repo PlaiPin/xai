@@ -289,9 +289,20 @@ xai_err_t xai_voice_client_connect(xai_voice_client_t client)
 
     lock_client(client);
     if (client->ws) {
-        unlock_client(client);
-        return XAI_OK;
+        // If we already have a websocket handle, only treat it as connected if the transport says so.
+        // After long idle, the socket may be dead while the handle is still non-NULL.
+        if (esp_websocket_client_is_connected(client->ws)) {
+            unlock_client(client);
+            return XAI_OK;
+        }
+
+        // Stale handle: destroy and recreate so tap-to-reconnect can work.
+        esp_websocket_client_stop(client->ws);
+        esp_websocket_client_destroy(client->ws);
+        client->ws = NULL;
+        demote_to_disconnected_locked(client);
     }
+    unlock_client(client);
     emit_state(client, XAI_VOICE_STATE_CONNECTING, NULL);
 
     char auth_header[1024];
@@ -310,6 +321,7 @@ xai_err_t xai_voice_client_connect(xai_voice_client_t client)
         .reconnect_timeout_ms = client->cfg.reconnect_timeout_ms,
     };
 
+    lock_client(client);
     client->ws = esp_websocket_client_init(&websocket_cfg);
     if (!client->ws) {
         unlock_client(client);
@@ -346,16 +358,22 @@ bool xai_voice_client_is_connected(xai_voice_client_t client)
     if (!client) return false;
     lock_client(client);
     bool v = false;
+    bool transitioned_to_disconnected = false;
     if (client->ws) {
+        const bool was_connected = client->connected;
         v = esp_websocket_client_is_connected(client->ws);
         // Keep cached flag roughly in sync so callbacks/logic don't stay stale.
-        if (!v && client->connected) {
+        if (!v && was_connected) {
             demote_to_disconnected_locked(client);
+            transitioned_to_disconnected = true;
         } else if (v) {
             client->connected = true;
         }
     }
     unlock_client(client);
+    if (transitioned_to_disconnected) {
+        emit_state(client, XAI_VOICE_STATE_DISCONNECTED, "socket not connected");
+    }
     return v;
 }
 

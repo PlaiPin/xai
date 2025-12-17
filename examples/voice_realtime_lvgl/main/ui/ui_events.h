@@ -78,6 +78,14 @@ void ui_on_audio_received(const int16_t *pcm, size_t sample_count, int sample_ra
  */
 void ui_on_transcript_received(const char *text);
 
+/**
+ * @brief Drain queued UI events and apply updates.
+ *
+ * Must be called from the LVGL task while holding the LVGL mutex (ui_lock()).
+ * This avoids calling LVGL from network/audio tasks and prevents ui_lock re-entrancy issues.
+ */
+void ui_events_process_lvgl(void);
+
 #ifdef __cplusplus
 }
 #endif
