@@ -7,6 +7,8 @@
 #define UI_EVENTS_H
 
 #include <stddef.h>
+#include <stdint.h>
+#include "esp_err.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -19,6 +21,22 @@ extern "C" {
  * to handle audio, status, and transcript updates.
  */
 void ui_setup_event_handlers(void);
+
+/**
+ * @brief Initialize and connect the xAI Voice Realtime SDK client.
+ *
+ * Creates the SDK client and starts the WebSocket connection. The UI will
+ * transition to READY once the SDK reports SESSION_READY.
+ *
+ * @param api_key xAI API key
+ * @return ESP_OK on success, error code otherwise
+ */
+esp_err_t ui_voice_start(const char *api_key);
+
+/**
+ * @brief Check whether the voice realtime client is connected (transport).
+ */
+bool ui_voice_is_connected(void);
 
 /**
  * @brief Handle button click event
@@ -42,12 +60,13 @@ void ui_on_websocket_status(const char *status);
  * @brief Handle audio data received
  * 
  * Called from WebSocket event loop when audio delta arrives.
- * Decodes and plays the audio.
+ * Plays the decoded PCM16 audio.
  * 
- * @param base64 Base64-encoded audio data
- * @param len Length of base64 string
+ * @param pcm PCM16 mono samples
+ * @param sample_count Number of samples
+ * @param sample_rate_hz Sample rate (Hz)
  */
-void ui_on_audio_received(const char *base64, size_t len);
+void ui_on_audio_received(const int16_t *pcm, size_t sample_count, int sample_rate_hz);
 
 /**
  * @brief Handle transcript text received
@@ -59,31 +78,13 @@ void ui_on_audio_received(const char *base64, size_t len);
  */
 void ui_on_transcript_received(const char *text);
 
-// Forward declarations from websocket_client.h
-typedef void (*ws_audio_callback_t)(const char *base64, size_t len);
-typedef void (*ws_status_callback_t)(const char *status_msg);
-typedef void (*ws_transcript_callback_t)(const char *text);
-
 /**
- * @brief Get audio callback for WebSocket client
- * 
- * @return Audio callback function pointer
+ * @brief Drain queued UI events and apply updates.
+ *
+ * Must be called from the LVGL task while holding the LVGL mutex (ui_lock()).
+ * This avoids calling LVGL from network/audio tasks and prevents ui_lock re-entrancy issues.
  */
-ws_audio_callback_t ui_get_audio_callback(void);
-
-/**
- * @brief Get status callback for WebSocket client
- * 
- * @return Status callback function pointer
- */
-ws_status_callback_t ui_get_status_callback(void);
-
-/**
- * @brief Get transcript callback for WebSocket client
- * 
- * @return Transcript callback function pointer
- */
-ws_transcript_callback_t ui_get_transcript_callback(void);
+void ui_events_process_lvgl(void);
 
 #ifdef __cplusplus
 }

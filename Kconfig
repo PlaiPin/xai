@@ -79,6 +79,20 @@ menu "xAI Configuration"
                 Disable to save ~2KB of flash space if you only need
                 synchronous completions.
 
+        config XAI_ENABLE_VOICE_REALTIME
+            bool "Enable Grok Voice Realtime (WebSocket) support"
+            default y
+            help
+                Enable the Grok Voice Realtime WebSocket client (wss://api.x.ai/v1/realtime).
+                
+                This adds support for:
+                - session.update / session.updated
+                - conversation.item.create + response.create
+                - response.output_audio.delta (base64 -> PCM16 decode)
+                - response.output_audio_transcript.delta
+                
+                Disable to reduce dependencies and flash usage if you only need REST APIs.
+
         config XAI_ENABLE_VISION
             bool "Enable vision API support"
             default y
@@ -133,6 +147,35 @@ menu "xAI Configuration"
                 manage conversation state manually.
 
     endmenu # Feature Toggles
+
+    menu "Voice Realtime (WebSocket) Settings"
+        depends on XAI_ENABLE_VOICE_REALTIME
+
+        config XAI_VOICE_WS_RX_BUFFER_SIZE
+            int "WebSocket RX buffer size (bytes)"
+            default 16384
+            range 2048 65536
+            help
+                Receive buffer size for esp_websocket_client.
+                Large server events (audio deltas) are fragmented if they exceed this buffer.
+
+        config XAI_VOICE_WS_MAX_MESSAGE_SIZE
+            int "Maximum single WebSocket message size (bytes)"
+            default 262144
+            range 16384 1048576
+            help
+                Maximum size of a single JSON message from the realtime API.
+                Must be large enough to hold response.output_audio.delta events.
+
+        config XAI_VOICE_PCM_BUFFER_BYTES
+            int "PCM16 decode buffer size (bytes)"
+            default 65536
+            range 8192 262144
+            help
+                Size of the SDK-owned PCM decode buffer for base64 audio deltas.
+                Decoded PCM bytes are PCM16 little-endian; sample_count = bytes/2.
+
+    endmenu # Voice Realtime (WebSocket) Settings
 
     menu "Advanced Features"
         depends on XAI_ENABLE_SEARCH || XAI_ENABLE_TOOLS

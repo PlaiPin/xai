@@ -19,6 +19,7 @@ typedef enum {
     BTN_STATE_READY,      // Ready to send request (blue)
     BTN_STATE_CONNECTING, // WebSocket connecting (gray, disabled)
     BTN_STATE_SPEAKING,   // Audio playing (green, pulsing)
+    BTN_STATE_DISCONNECTED, // Disconnected (orange, tap to reconnect)
     BTN_STATE_ERROR       // Error occurred (red)
 } button_state_t;
 

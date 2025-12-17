@@ -1,4 +1,4 @@
-# Voice Demo Simple - WebSocket Realtime Voice
+# Voice Realtime (Headless) - WebSocket Audio Playback
 
 This example demonstrates the **xAI Grok Voice API** using WebSocket for real-time voice interaction:
 
@@ -78,9 +78,9 @@ PA Enable       -> GPIO 46 (power amplifier)
 - **Decoding**: mbedTLS base64 decoder (built-in)
 - **Codec**: ES8311 (I2C-controlled DAC)
 
-## Configuration
+## Configuration (headless demo)
 
-**Edit the credentials directly in `main/voice_demo_simple.c`:**
+**Edit the credentials directly in `main/voice_demo_headless.c`:**
 
 ### 1. WiFi Credentials
 
@@ -119,7 +119,7 @@ Pins are **pre-configured** for the **Waveshare ESP32-S3-Touch-AMOLED-1.75**:
 ## Building and Flashing
 
 ```bash
-cd examples/voice_demo_simple
+cd examples/voice_realtime_lvgl
 
 # Set target to ESP32-S3 (only needed once)
 idf.py set-target esp32s3
@@ -130,6 +130,14 @@ idf.py build
 # Flash to ESP32-S3
 idf.py -p /dev/ttyUSB0 flash monitor
 ```
+
+## Selecting the entrypoint (UI vs headless)
+
+By default this example builds the LVGL UI app (`main/main.c`).
+To build the headless demo instead, edit `main/CMakeLists.txt` and swap:
+
+- build `voice_demo_headless.c`
+- do not build `main.c`
 
 ## How It Works
 
@@ -383,8 +391,8 @@ W (9002) voice_demo: Buffer overflow at 47280 bytes! Discarding.
 **Impact**: Minor audio skips every 30-60 seconds. Still very usable!
 
 **To eliminate warnings (optional):**
-- Increase `WS_BUFFER_SIZE` from 48KB to 64KB or 96KB in `voice_demo_simple.c`
-- Trade-off: Uses more RAM (~16-48KB additional)
+- Increase `max_message_size` / `pcm_buffer_bytes` in the xAI SDK voice realtime config used by this demo.
+- Trade-off: Uses more RAM (often PSRAM).
 
 ### Audio Glitches or Cutouts
 

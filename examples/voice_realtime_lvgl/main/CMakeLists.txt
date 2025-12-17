@@ -1,11 +1,9 @@
 idf_component_register(
     SRCS 
-        "voice_demo_ui.c"
+        "main.c"
         "i2c/i2c_manager.c"
         "network/wifi_manager.c"
-        "network/websocket_client.c"
         "audio/audio_init.c"
-        "audio/audio_decoder.c"
         "audio/audio_playback.c"
         "ui/ui_init.cpp"
         "ui/ui_screens.cpp"
@@ -26,6 +24,7 @@ idf_component_register(
         esp_timer
         esp_lcd
         spi_flash
+        xai
         espressif__esp_websocket_client
         espressif__cjson
         espressif__es8311

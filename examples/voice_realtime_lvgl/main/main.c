@@ -1,5 +1,5 @@
 /**
- * @file voice_demo_ui.c
+ * @file main.c
  * @brief Main application entry point for xAI Voice Demo with LVGL UI
  * 
  * This application demonstrates the xAI Grok Voice API with a touch UI:
@@ -27,7 +27,6 @@
 #include "config/app_config.h"
 #include "i2c/i2c_manager.h"
 #include "network/wifi_manager.h"
-#include "network/websocket_client.h"
 #include "audio/audio_init.h"
 #include "audio/audio_playback.h"
 #include "ui/ui_init.h"
@@ -141,10 +140,7 @@ void app_main(void)
     ESP_LOGI(TAG, "[8/8] Initializing WebSocket client...");
     ui_setup_event_handlers();  // Setup audio buffer and callbacks
     
-    ESP_ERROR_CHECK(ws_init(XAI_API_KEY, 
-                            ui_get_audio_callback(),
-                            ui_get_status_callback(),
-                            ui_get_transcript_callback()));
+    ESP_ERROR_CHECK(ui_voice_start(XAI_API_KEY));
     ESP_LOGI(TAG, "✓ WebSocket client initialized");
     
     // WebSocket connect + session.update happen asynchronously; do NOT enable the button yet.
@@ -175,7 +171,7 @@ void app_main(void)
         // Print status
         ESP_LOGI(TAG, "Status: WiFi=%s, WebSocket=%s, Audio=%s",
                  wifi_is_connected() ? "connected" : "disconnected",
-                 ws_is_connected() ? "connected" : "disconnected",
+                 ui_voice_is_connected() ? "connected" : "disconnected",
                  audio_is_playing() ? "playing" : "idle");
     }
 }
